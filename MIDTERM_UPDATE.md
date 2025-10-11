@@ -9,13 +9,13 @@ I have successfully started development on my fault-tolerant distributed produce
 
 ## Completed Work
 
-### 1. Project Infrastructure ✅
+### 1. Project Infrastructure (done)
 - **Git Repository**: Properly initialized with clear commit history
 - **Project Structure**: Simple, educational directory layout
 - **Build System**: CMakeLists.txt configuration (tested with manual compilation)
 - **Documentation**: README.md and DEVELOPMENT_PLAN.md with incremental approach
 
-### 2. Foundation Classes ✅
+### 2. Foundation Classes (done)
 - **Transaction Class**: Complete implementation with:
   - JSON-like data structure (ID, card number, amount, timestamp, merchant, location)
   - Serialization/deserialization for network transmission
@@ -23,7 +23,7 @@ I have successfully started development on my fault-tolerant distributed produce
 - **Utils Class**: Credit card validation using Luhn algorithm
 - **Random Data Generation**: Functions for generating realistic test transactions
 
-### 3. Basic Producer Implementation ✅
+### 3. Basic Producer Implementation (done)
 - **Working Executable**: Compiles and runs successfully
 - **Transaction Generation**: Creates 100 realistic credit card transactions
 - **Validation**: All generated transactions pass Luhn algorithm validation
@@ -53,16 +53,16 @@ bfb6674 Created project skeleton
 
 ## Progress Against Original Milestones
 
-### Phase 1: Foundation (Week 1-2) - ✅ COMPLETED
-- ✅ Project structure and build system
-- ✅ Transaction data structures 
-- ✅ Credit card validation (Luhn algorithm)
-- ✅ Basic utilities and random data generation
+### Phase 1: Foundation (Week 1-2) -  COMPLETED
+- (done) Project structure and build system
+- (done) Transaction data structures 
+- (done) Credit card validation (Luhn algorithm)
+- (done) Basic utilities and random data generation
 
-### Phase 2: Basic Communication (Week 3) - 🔄 IN PROGRESS
-- ✅ Producer implementation (file-based)
-- ⏳ Consumer implementation (next step)
-- ⏳ Socket communication (replacing file I/O)
+### Phase 2: Basic Communication (Week 3) -  IN PROGRESS
+- (done) Producer implementation (file-based)
+- _ Consumer implementation (next step)
+- _ Socket communication (replacing file I/O)
 
 ## Next Steps (By Next Update)
 
