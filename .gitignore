@@ -1,0 +1,14 @@
+# Build files
+build/
+*.o
+*.exe
+producer
+broker
+consumer
+
+# IDE and system files
+.vscode/
+.DS_Store
+
+# Log files  
+*.log
