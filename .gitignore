@@ -2,9 +2,9 @@
 build/
 *.o
 *.exe
-producer
-broker
-consumer
+producer_exe
+broker_exe
+consumer_exe
 
 # IDE and system files
 .vscode/
