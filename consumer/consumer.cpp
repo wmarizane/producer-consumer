@@ -4,6 +4,13 @@
 #include <fstream>
 #include <vector>
 #include <iomanip>
+#include <string>
+#include <cstring>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 struct Statistics {
     int total_transactions = 0;
@@ -30,68 +37,133 @@ struct Statistics {
     }
 };
 
+// Process a single transaction line and update stats; returns true if processed
+static bool process_line(const std::string& line, Statistics& stats, std::vector<Transaction>& invalidTransactions, int lineNumber) {
+    if (line.empty()) return false;
+    try {
+        Transaction t = Transaction::deserialize(line);
+        stats.total_transactions++;
+        stats.total_amount += t.amount;
+        if (t.isValid()) {
+            stats.valid_transactions++;
+            stats.valid_amount += t.amount;
+        } else {
+            stats.invalid_transactions++;
+            invalidTransactions.push_back(t);
+        }
+        if (stats.total_transactions % 10 == 0) {
+            std::cout << "  Processed " << stats.total_transactions << " transactions..." << std::endl;
+        }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Error parsing line " << lineNumber << ": " << e.what() << std::endl;
+        return false;
+    }
+}
+
+// Run as TCP server on given port, read newline-delimited records, send "ACK\n"
+static int run_server(uint16_t port) {
+    int server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) { perror("socket"); return 1; }
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
+    if (bind(server_fd, (sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); close(server_fd); return 1; }
+    if (listen(server_fd, 5) < 0) { perror("listen"); close(server_fd); return 1; }
+    std::cout << "Listening on 0.0.0.0:" << port << " ..." << std::endl;
+
+    Statistics stats;
+    std::vector<Transaction> invalids;
+    int client_fd;
+    sockaddr_in cli{}; socklen_t clilen = sizeof(cli);
+    client_fd = accept(server_fd, (sockaddr*)&cli, &clilen);
+    if (client_fd < 0) { perror("accept"); close(server_fd); return 1; }
+    std::cout << "Client connected: " << inet_ntoa(cli.sin_addr) << ":" << ntohs(cli.sin_port) << std::endl;
+
+    std::string buffer;
+    buffer.reserve(8192);
+    char buf[1024];
+    int lineNumber = 0;
+    while (true) {
+        ssize_t n = recv(client_fd, buf, sizeof(buf), 0);
+        if (n < 0) { perror("recv"); break; }
+        if (n == 0) { break; } // EOF
+        buffer.append(buf, buf + n);
+        size_t pos;
+        while ((pos = buffer.find('\n')) != std::string::npos) {
+            std::string line = buffer.substr(0, pos);
+            buffer.erase(0, pos + 1);
+            lineNumber++;
+            bool ok = process_line(line, stats, invalids, lineNumber);
+            // Send ACK for each received line regardless of valid/invalid
+            const char* ack = ok ? "ACK\n" : "ERR\n";
+            send(client_fd, ack, strlen(ack), 0);
+        }
+    }
+
+    close(client_fd);
+    close(server_fd);
+
+    // Print statistics
+    stats.print();
+    if (!invalids.empty()) {
+        std::cout << "\n=== Sample Invalid Transactions ===" << std::endl;
+        int samplesToShow = std::min(5, (int)invalids.size());
+        for (int i = 0; i < samplesToShow; i++) {
+            const auto& t = invalids[i];
+            std::cout << "ID: " << t.transaction_id 
+                      << ", Card: " << t.card_number
+                      << ", Amount: $" << t.amount;
+            if (t.amount <= 0) {
+                std::cout << " [Invalid: Amount <= 0]";
+            } else if (!Utils::luhnCheck(t.card_number)) {
+                std::cout << " [Invalid: Failed Luhn check]";
+            }
+            std::cout << std::endl;
+        }
+        if ((int)invalids.size() > samplesToShow) {
+            std::cout << "... and " << (invalids.size() - samplesToShow) << " more invalid transactions" << std::endl;
+        }
+    }
+    std::cout << "\nConsumer server completed successfully!" << std::endl;
+    return 0;
+}
+
 int main(int argc, char* argv[]) {
     std::cout << "=== Fault-Tolerant Distributed Consumer ===" << std::endl;
-    
-    // Default input file
-    std::string inputFile = "transactions.txt";
-    
-    // Allow command-line argument for input file
-    if (argc > 1) {
-        inputFile = argv[1];
+
+    // Socket server mode: --server <port>
+    if (argc >= 3 && std::string(argv[1]) == "--server") {
+        uint16_t port = static_cast<uint16_t>(std::stoi(argv[2]));
+        return run_server(port);
     }
-    
+
+    // Default: file mode
+    std::string inputFile = "transactions.txt";
+    if (argc > 1) { inputFile = argv[1]; }
     std::cout << "Reading transactions from: " << inputFile << std::endl;
-    
-    // Open input file
+
     std::ifstream inFile(inputFile);
     if (!inFile.is_open()) {
         std::cerr << "Error: Could not open file " << inputFile << std::endl;
         return 1;
     }
-    
+
     Statistics stats;
     std::vector<Transaction> invalidTransactions;
     std::string line;
     int lineNumber = 0;
-    
-    // Process transactions
     std::cout << "\nProcessing transactions..." << std::endl;
-    
     while (std::getline(inFile, line)) {
         lineNumber++;
-        
-        if (line.empty()) continue;
-        
-        try {
-            Transaction t = Transaction::deserialize(line);
-            stats.total_transactions++;
-            stats.total_amount += t.amount;
-            
-            if (t.isValid()) {
-                stats.valid_transactions++;
-                stats.valid_amount += t.amount;
-            } else {
-                stats.invalid_transactions++;
-                invalidTransactions.push_back(t);
-            }
-            
-            // Show progress every 10 transactions
-            if (stats.total_transactions % 10 == 0) {
-                std::cout << "  Processed " << stats.total_transactions << " transactions..." << std::endl;
-            }
-            
-        } catch (const std::exception& e) {
-            std::cerr << "Error parsing line " << lineNumber << ": " << e.what() << std::endl;
-        }
+        process_line(line, stats, invalidTransactions, lineNumber);
     }
-    
     inFile.close();
-    
-    // Print statistics
+
     stats.print();
-    
-    // Show sample invalid transactions if any
     if (!invalidTransactions.empty()) {
         std::cout << "\n=== Sample Invalid Transactions ===" << std::endl;
         int samplesToShow = std::min(5, (int)invalidTransactions.size());
@@ -100,8 +172,6 @@ int main(int argc, char* argv[]) {
             std::cout << "ID: " << t.transaction_id 
                       << ", Card: " << t.card_number
                       << ", Amount: $" << t.amount;
-            
-            // Determine why it's invalid
             if (t.amount <= 0) {
                 std::cout << " [Invalid: Amount <= 0]";
             } else if (!Utils::luhnCheck(t.card_number)) {
@@ -109,14 +179,11 @@ int main(int argc, char* argv[]) {
             }
             std::cout << std::endl;
         }
-        
         if (invalidTransactions.size() > samplesToShow) {
             std::cout << "... and " << (invalidTransactions.size() - samplesToShow) 
                       << " more invalid transactions" << std::endl;
         }
     }
-    
     std::cout << "\nConsumer completed successfully!" << std::endl;
-    
     return 0;
 }
