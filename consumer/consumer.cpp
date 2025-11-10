@@ -141,6 +141,57 @@ int main(int argc, char* argv[]) {
         return run_server(port);
     }
 
+    // Socket client mode: --connect <host> <port>
+    if (argc >= 4 && std::string(argv[1]) == "--connect") {
+        std::string host = argv[2];
+        uint16_t port = static_cast<uint16_t>(std::stoi(argv[3]));
+        // Connect to broker consumer port and process pushed records
+        int sockfd = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (sockfd < 0) { perror("socket"); return 1; }
+        sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons(port);
+        if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) <= 0) { std::cerr << "Invalid host" << std::endl; close(sockfd); return 1; }
+        if (connect(sockfd, (sockaddr*)&addr, sizeof(addr)) < 0) { perror("connect"); close(sockfd); return 1; }
+        std::cout << "Connected to broker at " << host << ":" << port << std::endl;
+
+        Statistics stats; std::vector<Transaction> invalids; std::string buffer; buffer.reserve(8192);
+        char buf[1024]; int lineNumber = 0;
+        while (true) {
+            ssize_t n = recv(sockfd, buf, sizeof(buf), 0);
+            if (n < 0) { perror("recv"); break; }
+            if (n == 0) { break; }
+            buffer.append(buf, buf + n);
+            size_t pos;
+            while ((pos = buffer.find('\n')) != std::string::npos) {
+                std::string line = buffer.substr(0, pos);
+                buffer.erase(0, pos + 1);
+                lineNumber++;
+                bool ok = process_line(line, stats, invalids, lineNumber);
+                const char* ack = ok ? "ACK\n" : "ERR\n";
+                send(sockfd, ack, strlen(ack), 0);
+            }
+        }
+        close(sockfd);
+        stats.print();
+        if (!invalids.empty()) {
+            std::cout << "\n=== Sample Invalid Transactions ===" << std::endl;
+            int samplesToShow = std::min(5, (int)invalids.size());
+            for (int i = 0; i < samplesToShow; i++) {
+                const auto& t = invalids[i];
+                std::cout << "ID: " << t.transaction_id 
+                          << ", Card: " << t.card_number
+                          << ", Amount: $" << t.amount;
+                if (t.amount <= 0) {
+                    std::cout << " [Invalid: Amount <= 0]";
+                } else if (!Utils::luhnCheck(t.card_number)) {
+                    std::cout << " [Invalid: Failed Luhn check]";
+                }
+                std::cout << std::endl;
+            }
+        }
+        std::cout << "\nConsumer client completed successfully!" << std::endl;
+        return 0;
+    }
+
     // Default: file mode
     std::string inputFile = "transactions.txt";
     if (argc > 1) { inputFile = argv[1]; }
