@@ -26,7 +26,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Generating sample transactions..." << std::endl;
     
     std::vector<Transaction> transactions;
-    const int numTransactions = 100; // Start small for testing
+    const int numTransactions = 10000; // 10K transactions for testing
     
     // Generate transactions
     for (int i = 0; i < numTransactions; i++) {
@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
     if (argc == 3) {
         std::string host = argv[1];
         uint16_t port = static_cast<uint16_t>(std::stoi(argv[2]));
-        std::cout << "Connecting to consumer at " << host << ":" << port << " ..." << std::endl;
+        std::cout << "Connecting to broker at " << host << ":" << port << " ..." << std::endl;
         int sockfd = ::socket(AF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) { perror("socket"); return 1; }
         sockaddr_in addr{};
