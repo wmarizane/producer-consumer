@@ -13,6 +13,8 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <sstream>
+#include <ctime>
 
 // Broker with fault tolerance: tracks message IDs, logs to disk, requeues on consumer failure.
 // - Append-only log: broker_log.txt (format: msgID|transaction_data)
@@ -31,6 +33,73 @@ static int make_server(uint16_t port) {
     if (bind(fd, (sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); close(fd); return -1; }
     if (listen(fd, 16) < 0) { perror("listen"); close(fd); return -1; }
     return fd;
+}
+
+// HTTP monitoring support
+static std::string build_json_status(const std::set<int>& producers, const std::vector<int>& consumers, 
+                                     uint64_t total_messages, const std::map<int, uint64_t>& pending,
+                                     const std::map<int, uint64_t>& consumer_counts) {
+    std::ostringstream json;
+    json << "{\n";
+    json << "  \"broker\": {\"active\": true, \"total_messages\": " << total_messages << "},\n";
+    
+    json << "  \"producers\": [";
+    bool first = true;
+    int prod_id = 1;
+    for (int p : producers) {
+        if (!first) json << ",";
+        json << "\n    {\"id\": \"p" << prod_id++ << "\", \"connected\": true, \"messages_sent\": 0}";
+        first = false;
+    }
+    json << "\n  ],\n";
+    
+    json << "  \"consumers\": [";
+    first = true;
+    int cons_id = 1;
+    for (int c : consumers) {
+        if (!first) json << ",";
+        uint64_t msg_count = consumer_counts.count(c) ? consumer_counts.at(c) : 0;
+        json << "\n    {\"id\": \"c" << cons_id++ << "\", \"connected\": true, \"pending\": " 
+             << (pending.count(c) ? 1 : 0) << ", \"messages_received\": " << msg_count << "}";
+        first = false;
+    }
+    json << "\n  ]\n";
+    json << "}";
+    
+    return json.str();
+}
+
+static void handle_http_request(int client_fd, const std::set<int>& producers, 
+                                const std::vector<int>& consumers, uint64_t total_messages,
+                                const std::map<int, uint64_t>& pending,
+                                const std::map<int, uint64_t>& consumer_counts) {
+    char buffer[1024];
+    ssize_t n = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+    if (n <= 0) {
+        close(client_fd);
+        return;
+    }
+    buffer[n] = '\0';
+    
+    // Parse HTTP request (simple GET /status check)
+    std::string request(buffer);
+    if (request.find("GET /status") != std::string::npos) {
+        std::string json = build_json_status(producers, consumers, total_messages, pending, consumer_counts);
+        
+        std::ostringstream response;
+        response << "HTTP/1.1 200 OK\r\n";
+        response << "Content-Type: application/json\r\n";
+        response << "Access-Control-Allow-Origin: *\r\n";
+        response << "Content-Length: " << json.length() << "\r\n";
+        response << "Connection: close\r\n";
+        response << "\r\n";
+        response << json;
+        
+        std::string resp_str = response.str();
+        send(client_fd, resp_str.c_str(), resp_str.length(), 0);
+    }
+    
+    close(client_fd);
 }
 
 struct Message {
@@ -107,13 +176,18 @@ static std::map<uint64_t, Message> load_log() {
 int main(int argc, char* argv[]) {
     uint16_t producer_port = 9100;
     uint16_t consumer_port = 9200;
+    uint16_t monitor_port = 8081;  // HTTP monitoring port
     if (argc >= 3) {
         producer_port = static_cast<uint16_t>(std::stoi(argv[1]));
         consumer_port = static_cast<uint16_t>(std::stoi(argv[2]));
     }
+    if (argc >= 4) {
+        monitor_port = static_cast<uint16_t>(std::stoi(argv[3]));
+    }
 
     std::cout << "=== Fault-Tolerant Broker ===" << std::endl;
     std::cout << "Producer port: " << producer_port << ", Consumer port: " << consumer_port << std::endl;
+    std::cout << "Monitor port: " << monitor_port << " (HTTP status at /status)" << std::endl;
 
     // Open log file for appending
     log_file.open("broker_log.txt", std::ios::app);
@@ -130,12 +204,14 @@ int main(int argc, char* argv[]) {
 
     int prod_listen = make_server(producer_port);
     int cons_listen = make_server(consumer_port);
-    if (prod_listen < 0 || cons_listen < 0) return 1;
+    int monitor_listen = make_server(monitor_port);
+    if (prod_listen < 0 || cons_listen < 0 || monitor_listen < 0) return 1;
 
     // State
     std::set<int> producers;           // connected producer sockets
     std::vector<int> consumers;        // connected consumer sockets
     std::map<int, uint64_t> pending;   // consumer fd -> pending message ID
+    std::map<int, uint64_t> consumer_counts;  // consumer fd -> messages received count
     size_t rr_index = 0;               // round-robin index
     std::map<int, std::string> inbuf;  // input buffers per socket
 
@@ -145,6 +221,7 @@ int main(int argc, char* argv[]) {
         int maxfd = 0;
         FD_SET(prod_listen, &rfds); maxfd = std::max(maxfd, prod_listen);
         FD_SET(cons_listen, &rfds); maxfd = std::max(maxfd, cons_listen);
+        FD_SET(monitor_listen, &rfds); maxfd = std::max(maxfd, monitor_listen);
         for (int p : producers) { FD_SET(p, &rfds); maxfd = std::max(maxfd, p); }
         for (int c : consumers) { FD_SET(c, &rfds); maxfd = std::max(maxfd, c); }
 
@@ -170,7 +247,17 @@ int main(int argc, char* argv[]) {
             if (fd >= 0) {
                 consumers.push_back(fd);
                 inbuf[fd] = std::string();
+                consumer_counts[fd] = 0;  // Initialize message count
                 std::cout << "Consumer connected: " << inet_ntoa(cli.sin_addr) << std::endl;
+            }
+        }
+
+        // Accept HTTP monitoring requests
+        if (FD_ISSET(monitor_listen, &rfds)) {
+            sockaddr_in cli{}; socklen_t cl = sizeof(cli);
+            int fd = accept(monitor_listen, (sockaddr*)&cli, &cl);
+            if (fd >= 0) {
+                handle_http_request(fd, producers, consumers, next_msg_id - 1, pending, consumer_counts);
             }
         }
 
@@ -220,6 +307,8 @@ int main(int argc, char* argv[]) {
                         messages[msg_id].acked = true;
                         update_ack_status(msg_id);  // Persist ACK to log
                         pending.erase(c);
+                        // Increment consumer message count
+                        consumer_counts[c]++;
                     }
                 }
             }
@@ -237,6 +326,7 @@ int main(int argc, char* argv[]) {
             close(fd);
             consumers.erase(std::remove(consumers.begin(), consumers.end(), fd), consumers.end());
             inbuf.erase(fd);
+            consumer_counts.erase(fd);  // Clean up message count
             if (rr_index >= consumers.size()) rr_index = 0;
         }
 
@@ -280,6 +370,7 @@ int main(int argc, char* argv[]) {
     for (int c : consumers) close(c);
     close(prod_listen);
     close(cons_listen);
+    close(monitor_listen);
     log_file.close();
     return 0;
 }

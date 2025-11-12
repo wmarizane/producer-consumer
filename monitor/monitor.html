@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed System Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            color: #e0e0e0;
+        }
+
+        header {
+            background: #16213e;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+
+        h1 {
+            font-size: 28px;
+            color: #00d4ff;
+            text-align: center;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #a0a0a0;
+            margin-top: 5px;
+            font-size: 14px;
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            gap: 20px;
+            padding: 20px;
+            overflow: hidden;
+        }
+
+        #canvas-container {
+            flex: 3;
+            background: #0f1419;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            position: relative;
+            overflow: hidden;
+            border: 1px solid #2a2a3e;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .stats-panel {
+            flex: 1;
+            background: #16213e;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            overflow-y: auto;
+            border: 1px solid #2a2a3e;
+        }
+
+        .stats-panel h2 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+            font-size: 20px;
+            border-bottom: 2px solid #00d4ff;
+            padding-bottom: 10px;
+        }
+
+        .stat-item {
+            background: #1a1a2e;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            border-left: 4px solid #00d4ff;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #a0a0a0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #00d4ff;
+            margin-top: 5px;
+        }
+
+        .node-list {
+            margin-top: 20px;
+        }
+
+        .node-item {
+            background: #1a1a2e;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border: 1px solid #2a2a3e;
+        }
+
+        .node-status {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #00ff00;
+            animation: pulse 2s infinite;
+        }
+
+        .node-status.offline {
+            background: #ff0000;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .node-name {
+            flex: 1;
+            font-weight: 500;
+            color: #e0e0e0;
+        }
+
+        .node-count {
+            background: #00d4ff;
+            color: #1a1a2e;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4caf50;
+            animation: pulse 2s infinite;
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Fault-Tolerant Distributed Transaction System</h1>
+        <div class="subtitle">Real-time topology and message flow visualization</div>
+    </header>
+
+    <div class="container">
+        <div id="canvas-container">
+            <canvas id="topology-canvas"></canvas>
+            <div class="status-indicator">
+                <div class="status-dot"></div>
+                <span id="status-text">Monitoring Active</span>
+            </div>
+            <div class="controls">
+                <button onclick="resetView()">Reset View</button>
+                <button onclick="toggleAnimation()">Toggle Animation</button>
+            </div>
+        </div>
+
+        <div class="stats-panel">
+            <h2>System Statistics</h2>
+            
+            <div class="stat-item">
+                <div class="stat-label">Total Messages</div>
+                <div class="stat-value" id="total-messages">0</div>
+            </div>
+
+            <div class="stat-item">
+                <div class="stat-label">Messages/Second</div>
+                <div class="stat-value" id="throughput">0</div>
+            </div>
+
+            <div class="stat-item">
+                <div class="stat-label">Active Consumers</div>
+                <div class="stat-value" id="active-consumers">0</div>
+            </div>
+
+            <h2 style="margin-top: 30px;">Connected Nodes</h2>
+            <div class="node-list" id="node-list">
+                <!-- Nodes will be added dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const UPDATE_INTERVAL = 1000; // Poll broker status every second
+        const BROKER_STATUS_URL = 'http://localhost:8081/status'; // Broker HTTP endpoint
+
+        // Canvas setup
+        const canvas = document.getElementById('topology-canvas');
+        const ctx = canvas.getContext('2d');
+        let animationEnabled = true;
+
+        // Data model
+        const nodes = {
+            broker: { x: 0.5, y: 0.5, type: 'broker', active: true },
+            producers: [],
+            consumers: []
+        };
+
+        let stats = {
+            totalMessages: 0,
+            messagesThisSecond: 0,
+            lastSecondCount: 0,
+            lastTotalMessages: 0  // Track previous total for throughput calculation
+        };
+
+        let messageParticles = [];
+
+        // Node colors
+        const COLORS = {
+            broker: '#667eea',
+            producer: '#4caf50',
+            consumer: '#ff9800',
+            edge: '#ddd',
+            particle: '#667eea'
+        };
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+            draw();
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Update from broker (fetch real data via HTTP)
+        async function updateFromBroker() {
+            try {
+                const response = await fetch(BROKER_STATUS_URL);
+                const data = await response.json();
+                
+                console.log('Broker data:', data); // Debug
+                
+                // Track current connected nodes
+                const currentProducerIds = data.producers ? data.producers.map(p => p.id) : [];
+                const currentConsumerIds = data.consumers ? data.consumers.map(c => c.id) : [];
+                
+                // Mark existing nodes as inactive if they're not in the current list
+                nodes.producers.forEach(p => {
+                    const serverNode = data.producers?.find(sp => sp.id === p.id);
+                    p.active = serverNode ? serverNode.connected : false;
+                    p.messageCount = serverNode ? serverNode.messages_sent : 0;
+                });
+                
+                nodes.consumers.forEach(c => {
+                    const serverNode = data.consumers?.find(sc => sc.id === c.id);
+                    c.active = serverNode ? serverNode.connected : false;
+                    c.messageCount = serverNode ? serverNode.messages_received : 0;
+                });
+                
+                // Add new producers
+                if (data.producers) {
+                    data.producers.forEach(p => {
+                        if (!nodes.producers.find(np => np.id === p.id)) {
+                            const newNode = addProducer(p.id);
+                            if (newNode) {
+                                newNode.messageCount = p.messages_sent || 0;
+                            }
+                        }
+                    });
+                }
+                
+                // Add new consumers
+                if (data.consumers) {
+                    data.consumers.forEach(c => {
+                        if (!nodes.consumers.find(nc => nc.id === c.id)) {
+                            const newNode = addConsumer(c.id);
+                            if (newNode) {
+                                newNode.messageCount = c.messages_received || 0;
+                            }
+                        }
+                    });
+                }
+                
+                // Update broker stats
+                if (data.broker) {
+                    nodes.broker.active = data.broker.active;
+                    stats.totalMessages = data.broker.total_messages || 0;
+                }
+                
+                document.getElementById('status-text').textContent = 'Monitoring Active';
+                updateStats();
+                updateNodeList();
+                
+            } catch (error) {
+                console.error('Broker fetch error:', error);
+                // Mark broker as inactive
+                nodes.broker.active = false;
+                // Mark all nodes as inactive when broker is down
+                nodes.producers.forEach(p => p.active = false);
+                nodes.consumers.forEach(c => c.active = false);
+                document.getElementById('status-text').textContent = 'Waiting for Broker...';
+                updateNodeList();
+            }
+        }
+
+        function addProducer(id) {
+            if (!nodes.producers.find(p => p.id === id)) {
+                const angle = (nodes.producers.length * Math.PI * 2) / 4 - Math.PI / 2;
+                const newNode = {
+                    id,
+                    x: 0.5 + Math.cos(angle) * 0.3,
+                    y: 0.5 + Math.sin(angle) * 0.3,
+                    type: 'producer',
+                    active: true,
+                    messageCount: 0
+                };
+                nodes.producers.push(newNode);
+                updateNodeList();
+                return newNode;
+            }
+            return nodes.producers.find(p => p.id === id);
+        }
+
+        function addConsumer(id) {
+            if (!nodes.consumers.find(c => c.id === id)) {
+                const angle = (nodes.consumers.length * Math.PI * 2) / 6 + Math.PI / 2;
+                const newNode = {
+                    id,
+                    x: 0.5 + Math.cos(angle) * 0.3,
+                    y: 0.5 + Math.sin(angle) * 0.3,
+                    type: 'consumer',
+                    active: true,
+                    messageCount: 0
+                };
+                nodes.consumers.push(newNode);
+                updateNodeList();
+                return newNode;
+            }
+            return nodes.consumers.find(c => c.id === id);
+        }
+
+        function removeNode(type, id) {
+            if (type === 'producer') {
+                nodes.producers = nodes.producers.filter(p => p.id !== id);
+            } else if (type === 'consumer') {
+                nodes.consumers = nodes.consumers.filter(c => c.id !== id);
+            }
+            updateNodeList();
+        }
+
+        function sendMessage(fromType, fromId, toType, toId) {
+            const from = fromType === 'broker' ? nodes.broker :
+                        fromType === 'producer' ? nodes.producers.find(p => p.id === fromId) :
+                        nodes.consumers.find(c => c.id === toId);
+            
+            const to = toType === 'broker' ? nodes.broker :
+                      toType === 'consumer' ? nodes.consumers.find(c => c.id === toId) :
+                      nodes.producers.find(p => p.id === fromId);
+
+            if (from && to) {
+                messageParticles.push({
+                    fromX: from.x * canvas.width,
+                    fromY: from.y * canvas.height,
+                    toX: to.x * canvas.width,
+                    toY: to.y * canvas.height,
+                    progress: 0,
+                    speed: 0.02
+                });
+                stats.totalMessages++;
+                stats.messagesThisSecond++;
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw edges
+            ctx.strokeStyle = COLORS.edge;
+            ctx.lineWidth = 2;
+
+            nodes.producers.forEach(p => {
+                drawEdge(p, nodes.broker);
+            });
+
+            nodes.consumers.forEach(c => {
+                drawEdge(nodes.broker, c);
+            });
+
+            // Draw message particles
+            if (animationEnabled) {
+                messageParticles = messageParticles.filter(p => {
+                    p.progress += p.speed;
+                    if (p.progress >= 1) return false;
+
+                    const x = p.fromX + (p.toX - p.fromX) * p.progress;
+                    const y = p.fromY + (p.toY - p.fromY) * p.progress;
+
+                    ctx.fillStyle = COLORS.particle;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    return true;
+                });
+            }
+
+            // Draw nodes
+            drawNode(nodes.broker, 'Broker', COLORS.broker, 40);
+            nodes.producers.forEach(p => drawNode(p, p.id.toUpperCase(), COLORS.producer, 30));
+            nodes.consumers.forEach(c => drawNode(c, c.id.toUpperCase(), COLORS.consumer, 30));
+
+            if (animationEnabled) {
+                requestAnimationFrame(draw);
+            }
+        }
+
+        function drawEdge(from, to) {
+            const fromX = from.x * canvas.width;
+            const fromY = from.y * canvas.height;
+            const toX = to.x * canvas.width;
+            const toY = to.y * canvas.height;
+
+            ctx.beginPath();
+            ctx.moveTo(fromX, fromY);
+            ctx.lineTo(toX, toY);
+            ctx.stroke();
+        }
+
+        function drawNode(node, label, color, size) {
+            const x = node.x * canvas.width;
+            const y = node.y * canvas.height;
+
+            // Shadow
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = 15;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 2;
+
+            // Node circle
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Reset shadow
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+
+            // Status ring (green for active, red for disconnected)
+            ctx.strokeStyle = node.active ? '#00ff00' : '#ff0000';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(x, y, size + 6, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Inner border
+            ctx.strokeStyle = '#1a1a2e';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Label
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, x, y);
+
+            // Count badge for producers/consumers
+            if (node.messageCount > 0) {
+                ctx.fillStyle = '#00d4ff';
+                ctx.beginPath();
+                ctx.arc(x + size - 5, y - size + 5, 12, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 10px sans-serif';
+                ctx.fillText(node.messageCount, x + size - 5, y - size + 5);
+            }
+        }
+
+        function updateNodeList() {
+            const nodeList = document.getElementById('node-list');
+            nodeList.innerHTML = '';
+
+            // Broker
+            nodeList.innerHTML += `
+                <div class="node-item">
+                    <div class="node-status ${nodes.broker.active ? '' : 'offline'}"></div>
+                    <div class="node-name">Broker</div>
+                    <div class="node-count">${stats.totalMessages} total</div>
+                </div>
+            `;
+
+            // Producers
+            nodes.producers.forEach(p => {
+                nodeList.innerHTML += `
+                    <div class="node-item">
+                        <div class="node-status ${p.active ? '' : 'offline'}"></div>
+                        <div class="node-name">${p.id.toUpperCase()} (Producer)</div>
+                        <div class="node-count">${p.messageCount} sent</div>
+                    </div>
+                `;
+            });
+
+            // Consumers
+            nodes.consumers.forEach(c => {
+                nodeList.innerHTML += `
+                    <div class="node-item">
+                        <div class="node-status ${c.active ? '' : 'offline'}"></div>
+                        <div class="node-name">${c.id.toUpperCase()} (Consumer)</div>
+                        <div class="node-count">${c.messageCount} recv</div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('active-consumers').textContent = nodes.consumers.filter(c => c.active).length;
+        }
+
+        function updateStats() {
+            document.getElementById('total-messages').textContent = stats.totalMessages;
+            
+            // Calculate throughput as difference from last update
+            const throughput = stats.totalMessages - stats.lastTotalMessages;
+            document.getElementById('throughput').textContent = throughput;
+            
+            // Update last total for next calculation
+            stats.lastTotalMessages = stats.totalMessages;
+        }
+
+        function resetView() {
+            stats = { totalMessages: 0, messagesThisSecond: 0, lastSecondCount: 0, lastTotalMessages: 0 };
+            messageParticles = [];
+            nodes.producers = [];
+            nodes.consumers = [];
+            updateNodeList();
+            updateStats();
+            draw();
+        }
+
+        function toggleAnimation() {
+            animationEnabled = !animationEnabled;
+            if (animationEnabled) {
+                draw();
+            }
+        }
+
+        // Initialize
+        updateNodeList();
+        draw();
+
+        // Start polling broker for updates
+        setInterval(updateFromBroker, UPDATE_INTERVAL);
+        updateFromBroker(); // Initial fetch
+
+        // Make functions available globally for console testing
+        window.addProducer = addProducer;
+        window.addConsumer = addConsumer;
+        window.removeNode = removeNode;
+        window.sendMessage = sendMessage;
+    </script>
+</body>
+</html>
