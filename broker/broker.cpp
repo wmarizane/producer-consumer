@@ -44,7 +44,15 @@ static uint64_t next_msg_id = 1;
 
 static void log_message(uint64_t id, const std::string& data) {
     if (log_file.is_open()) {
-        log_file << id << "|" << data << std::endl;
+        log_file << id << "|0|" << data << std::endl;  // 0 = unacked
+        log_file.flush();
+    }
+}
+
+static void update_ack_status(uint64_t msg_id) {
+    // For simplicity, we append an ACK marker to the log
+    if (log_file.is_open()) {
+        log_file << msg_id << "|1|ACK" << std::endl;  // 1 = acked
         log_file.flush();
     }
 }
@@ -55,14 +63,43 @@ static std::map<uint64_t, Message> load_log() {
     if (!infile.is_open()) return msgs;
     std::string line;
     while (std::getline(infile, line)) {
-        size_t pos = line.find('|');
-        if (pos == std::string::npos) continue;
-        uint64_t id = std::stoull(line.substr(0, pos));
-        std::string data = line.substr(pos + 1);
-        msgs[id] = {id, data, false};
+        size_t pos1 = line.find('|');
+        if (pos1 == std::string::npos) continue;
+        size_t pos2 = line.find('|', pos1 + 1);
+        if (pos2 == std::string::npos) continue;
+        
+        uint64_t id = std::stoull(line.substr(0, pos1));
+        int acked = std::stoi(line.substr(pos1 + 1, pos2 - pos1 - 1));
+        std::string data = line.substr(pos2 + 1);
+        
+        if (acked == 0) {
+            // Unacked message - add/keep it
+            msgs[id] = {id, data, false};
+        } else if (acked == 1 && data == "ACK") {
+            // ACK marker - mark message as acked or remove it
+            if (msgs.count(id)) {
+                msgs[id].acked = true;
+            }
+        } else if (acked == 1) {
+            // Already acked message in log - ignore it
+            continue;
+        }
+        
         if (id >= next_msg_id) next_msg_id = id + 1;
     }
     infile.close();
+    
+    // Remove acked messages
+    std::vector<uint64_t> to_remove;
+    for (const auto& kv : msgs) {
+        if (kv.second.acked) {
+            to_remove.push_back(kv.first);
+        }
+    }
+    for (uint64_t id : to_remove) {
+        msgs.erase(id);
+    }
+    
     std::cout << "Loaded " << msgs.size() << " unacked messages from log" << std::endl;
     return msgs;
 }
@@ -181,6 +218,7 @@ int main(int argc, char* argv[]) {
                     if (pending.count(c)) {
                         uint64_t msg_id = pending[c];
                         messages[msg_id].acked = true;
+                        update_ack_status(msg_id);  // Persist ACK to log
                         pending.erase(c);
                     }
                 }
