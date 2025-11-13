@@ -43,7 +43,7 @@ services:
       context: .
       dockerfile: Dockerfile.consumer
     container_name: transaction-consumer-1
-    command: ["broker", "9200"]  # broker hostname, consumer port
+    command: ["broker", "9200"]
     depends_on:
       - broker
     networks:

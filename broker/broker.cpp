@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <fstream>

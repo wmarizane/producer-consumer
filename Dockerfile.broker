@@ -11,7 +11,7 @@ WORKDIR /app
 COPY broker/broker.cpp ./broker/
 COPY common/*.cpp common/*.h ./common/
 
-# Compile broker
+# Compile broker (no need for common files, broker is standalone)
 RUN g++ -std=c++11 -O2 -o broker_exe broker/broker.cpp
 
 # Expose ports
