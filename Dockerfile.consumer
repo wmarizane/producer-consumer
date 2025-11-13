@@ -1,0 +1,19 @@
+# Use Alpine Linux for small image size
+FROM alpine:3.19
+
+# Install g++ and make
+RUN apk add --no-cache g++ make libstdc++
+
+# Set working directory
+WORKDIR /app
+
+# Copy source files
+COPY consumer/consumer.cpp ./consumer/
+COPY common/*.cpp common/*.h ./common/
+
+# Compile consumer
+RUN g++ -std=c++11 -O2 -o consumer_exe consumer/consumer.cpp common/transaction.cpp common/utils.cpp
+
+# Run consumer
+# Will connect to broker at the host specified
+ENTRYPOINT ["./consumer_exe", "--connect"]

@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # Broker - central message coordinator
+  broker:
+    build:
+      context: .
+      dockerfile: Dockerfile.broker
+    container_name: transaction-broker
+    ports:
+      - "9100:9100"  # Producer port
+      - "9200:9200"  # Consumer port
+      - "8081:8081"  # Monitor HTTP port
+    networks:
+      - transaction-net
+    # Limit resources to simulate distributed environment
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  # Producer - generates transactions
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile.producer
+    container_name: transaction-producer
+    command: ["broker", "9100", "0"]  # broker hostname, port, no delay
+    depends_on:
+      - broker
+    networks:
+      - transaction-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Consumer 1
+  consumer1:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    container_name: transaction-consumer-1
+    command: ["broker", "9200"]  # broker hostname, consumer port
+    depends_on:
+      - broker
+    networks:
+      - transaction-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Consumer 2
+  consumer2:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    container_name: transaction-consumer-2
+    command: ["broker", "9200"]
+    depends_on:
+      - broker
+    networks:
+      - transaction-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Consumer 3
+  consumer3:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    container_name: transaction-consumer-3
+    command: ["broker", "9200"]
+    depends_on:
+      - broker
+    networks:
+      - transaction-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Consumer 4
+  consumer4:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    container_name: transaction-consumer-4
+    command: ["broker", "9200"]
+    depends_on:
+      - broker
+    networks:
+      - transaction-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  transaction-net:
+    driver: bridge

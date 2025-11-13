@@ -1,0 +1,19 @@
+# Use Alpine Linux for small image size
+FROM alpine:3.19
+
+# Install g++ and make
+RUN apk add --no-cache g++ make
+
+# Set working directory
+WORKDIR /app
+
+# Copy source files
+COPY producer/producer.cpp ./producer/
+COPY common/*.cpp common/*.h ./common/
+
+# Compile producer
+RUN g++ -std=c++11 -O2 -o producer_exe producer/producer.cpp common/transaction.cpp common/utils.cpp
+
+# Run producer
+# Arguments will be passed when container runs: host port delay
+ENTRYPOINT ["./producer_exe"]
