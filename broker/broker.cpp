@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <cerrno>
 #include <cstring>
@@ -21,6 +22,13 @@
 // - On startup: replays unacked messages from log
 // - On consumer disconnect: requeues unacked messages
 
+static void set_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+}
+
 static int make_server(uint16_t port) {
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) { perror("socket"); return -1; }
@@ -37,7 +45,7 @@ static int make_server(uint16_t port) {
 
 // HTTP monitoring support
 static std::string build_json_status(const std::set<int>& producers, const std::vector<int>& consumers, 
-                                     uint64_t total_messages, const std::map<int, uint64_t>& pending,
+                                     uint64_t total_messages, const std::map<int, std::queue<uint64_t>>& pending,
                                      const std::map<int, uint64_t>& consumer_counts) {
     std::ostringstream json;
     json << "{\n";
@@ -59,8 +67,9 @@ static std::string build_json_status(const std::set<int>& producers, const std::
     for (int c : consumers) {
         if (!first) json << ",";
         uint64_t msg_count = consumer_counts.count(c) ? consumer_counts.at(c) : 0;
+        size_t pending_count = pending.count(c) ? pending.at(c).size() : 0;
         json << "\n    {\"id\": \"c" << cons_id++ << "\", \"connected\": true, \"pending\": " 
-             << (pending.count(c) ? 1 : 0) << ", \"messages_received\": " << msg_count << "}";
+             << pending_count << ", \"messages_received\": " << msg_count << "}";
         first = false;
     }
     json << "\n  ]\n";
@@ -71,7 +80,7 @@ static std::string build_json_status(const std::set<int>& producers, const std::
 
 static void handle_http_request(int client_fd, const std::set<int>& producers, 
                                 const std::vector<int>& consumers, uint64_t total_messages,
-                                const std::map<int, uint64_t>& pending,
+                                const std::map<int, std::queue<uint64_t>>& pending,
                                 const std::map<int, uint64_t>& consumer_counts) {
     char buffer[1024];
     ssize_t n = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
@@ -113,25 +122,34 @@ static uint64_t next_msg_id = 1;
 
 static void log_message(uint64_t id, const std::string& data) {
     if (log_file.is_open()) {
-        log_file << id << "|0|" << data << std::endl;  // 0 = unacked
-        log_file.flush();
+        log_file << id << "|0|" << data << '\n';  // 0 = unacked
+        // Don't flush - let OS buffer writes for performance
     }
 }
 
 static void update_ack_status(uint64_t msg_id) {
     // For simplicity, we append an ACK marker to the log
     if (log_file.is_open()) {
-        log_file << msg_id << "|1|ACK" << std::endl;  // 1 = acked
-        log_file.flush();
+        log_file << msg_id << "|1|ACK" << '\n';  // 1 = acked
+        // Don't flush - batch writes for performance
     }
 }
 
 static std::map<uint64_t, Message> load_log() {
     std::map<uint64_t, Message> msgs;
     std::ifstream infile("broker_log.txt");
-    if (!infile.is_open()) return msgs;
+    if (!infile.is_open()) {
+        std::cout << "No previous log file found - starting fresh" << std::endl;
+        return msgs;
+    }
+    
     std::string line;
+    int total_lines = 0;
+    int unacked_lines = 0;
+    int ack_markers = 0;
+    
     while (std::getline(infile, line)) {
+        total_lines++;
         size_t pos1 = line.find('|');
         if (pos1 == std::string::npos) continue;
         size_t pos2 = line.find('|', pos1 + 1);
@@ -144,8 +162,10 @@ static std::map<uint64_t, Message> load_log() {
         if (acked == 0) {
             // Unacked message - add/keep it
             msgs[id] = {id, data, false};
+            unacked_lines++;
         } else if (acked == 1 && data == "ACK") {
             // ACK marker - mark message as acked or remove it
+            ack_markers++;
             if (msgs.count(id)) {
                 msgs[id].acked = true;
             }
@@ -169,7 +189,11 @@ static std::map<uint64_t, Message> load_log() {
         msgs.erase(id);
     }
     
+    std::cout << "Log recovery: " << total_lines << " lines, " 
+              << unacked_lines << " unacked messages, " 
+              << ack_markers << " ACK markers" << std::endl;
     std::cout << "Loaded " << msgs.size() << " unacked messages from log" << std::endl;
+    std::cout << "Next message ID will be: " << next_msg_id << std::endl;
     return msgs;
 }
 
@@ -210,10 +234,16 @@ int main(int argc, char* argv[]) {
     // State
     std::set<int> producers;           // connected producer sockets
     std::vector<int> consumers;        // connected consumer sockets
-    std::map<int, uint64_t> pending;   // consumer fd -> pending message ID
+    std::map<int, std::queue<uint64_t>> pending;   // consumer fd -> queue of pending message IDs
     std::map<int, uint64_t> consumer_counts;  // consumer fd -> messages received count
     size_t rr_index = 0;               // round-robin index
     std::map<int, std::string> inbuf;  // input buffers per socket
+    const size_t WINDOW_SIZE = 1000;    // Maximum pending messages per consumer (pipeline depth)
+    
+    // Stats for monitoring
+    uint64_t total_dispatched = 0;
+    uint64_t total_acked = 0;
+    time_t last_stats_time = time(nullptr);
 
     // Main loop using select()
     while (true) {
@@ -234,6 +264,7 @@ int main(int argc, char* argv[]) {
             sockaddr_in cli{}; socklen_t cl = sizeof(cli);
             int fd = accept(prod_listen, (sockaddr*)&cli, &cl);
             if (fd >= 0) {
+                set_nonblocking(fd);
                 producers.insert(fd);
                 inbuf[fd] = std::string();
                 std::cout << "Producer connected: " << inet_ntoa(cli.sin_addr) << std::endl;
@@ -245,6 +276,10 @@ int main(int argc, char* argv[]) {
             sockaddr_in cli{}; socklen_t cl = sizeof(cli);
             int fd = accept(cons_listen, (sockaddr*)&cli, &cl);
             if (fd >= 0) {
+                set_nonblocking(fd);
+                // Increase socket send buffer for better throughput
+                int sendbuf = 256 * 1024;  // 256 KB
+                setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sendbuf, sizeof(sendbuf));
                 consumers.push_back(fd);
                 inbuf[fd] = std::string();
                 consumer_counts[fd] = 0;  // Initialize message count
@@ -278,9 +313,7 @@ int main(int argc, char* argv[]) {
                 messages[msg_id] = {msg_id, line, false};
                 log_message(msg_id, line);
                 queue.push(msg_id);
-                // Send ACK to producer for receipt
-                const char* ack = "ACK\n";
-                send(p, ack, strlen(ack), 0);
+                // No ACK needed - TCP guarantees delivery
             }
         }
         for (int fd : to_close) {
@@ -302,25 +335,29 @@ int main(int argc, char* argv[]) {
                 b.erase(0, pos + 1);
                 // Simple ACK: mark pending message as acked
                 if (line == "ACK" || line == "ERR") {
-                    if (pending.count(c)) {
-                        uint64_t msg_id = pending[c];
+                    if (pending.count(c) && !pending[c].empty()) {
+                        uint64_t msg_id = pending[c].front();
+                        pending[c].pop();
                         messages[msg_id].acked = true;
                         update_ack_status(msg_id);  // Persist ACK to log
-                        pending.erase(c);
                         // Increment consumer message count
                         consumer_counts[c]++;
+                        total_acked++;
                     }
                 }
             }
         }
         for (int fd : to_close) {
             std::cout << "Consumer disconnected";
-            // Requeue unacked message if any
-            if (pending.count(fd)) {
-                uint64_t msg_id = pending[fd];
-                queue.push(msg_id);
+            // Requeue unacked messages if any
+            if (pending.count(fd) && !pending[fd].empty()) {
+                std::cout << " (requeuing " << pending[fd].size() << " messages)";
+                while (!pending[fd].empty()) {
+                    uint64_t msg_id = pending[fd].front();
+                    pending[fd].pop();
+                    queue.push(msg_id);
+                }
                 pending.erase(fd);
-                std::cout << " (requeued message " << msg_id << ")";
             }
             std::cout << std::endl;
             close(fd);
@@ -330,21 +367,22 @@ int main(int argc, char* argv[]) {
             if (rr_index >= consumers.size()) rr_index = 0;
         }
 
-        // Dispatch queued messages to consumers (simple round-robin)
+        // Dispatch queued messages to consumers (round-robin with pipelining)
         while (!queue.empty() && !consumers.empty()) {
-            // Find next available consumer (one without pending message)
+            // Find next available consumer (one with room in their window)
             size_t checked = 0;
             int c = -1;
             while (checked < consumers.size()) {
                 int candidate = consumers[rr_index];
-                if (!pending.count(candidate)) {
+                size_t pending_count = pending.count(candidate) ? pending[candidate].size() : 0;
+                if (pending_count < WINDOW_SIZE) {
                     c = candidate;
                     break;
                 }
                 rr_index = (rr_index + 1) % consumers.size();
                 checked++;
             }
-            // All consumers busy? Wait for ACKs
+            // All consumers' windows full? Wait for ACKs
             if (c == -1) break;
             
             uint64_t msg_id = queue.front();
@@ -355,13 +393,40 @@ int main(int argc, char* argv[]) {
             std::string line = msg.data;
             line.push_back('\n');
             ssize_t n = send(c, line.c_str(), line.size(), 0);
-            if (n <= 0) {
-                // consumer likely disconnected; will be handled next loop
+            if (n < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // Socket buffer full - try next consumer
+                    rr_index = (rr_index + 1) % consumers.size();
+                    checked++;
+                    if (checked >= consumers.size()) {
+                        // All consumers have full send buffers
+                        break;
+                    }
+                    continue;
+                }
+                // Other error - consumer likely disconnected
                 break;
             }
+            if (n == 0) break; // Shouldn't happen but handle it
             queue.pop();
-            pending[c] = msg_id;
+            pending[c].push(msg_id);
+            total_dispatched++;
             rr_index = (rr_index + 1) % consumers.size();
+        }
+        
+        // Print periodic stats
+        time_t now = time(nullptr);
+        if (now - last_stats_time >= 5) {  // Every 5 seconds
+            size_t total_pending = 0;
+            for (const auto& kv : pending) {
+                total_pending += kv.second.size();
+            }
+            std::cout << "[Stats] Dispatched: " << total_dispatched 
+                      << ", ACKed: " << total_acked
+                      << ", Queue: " << queue.size()
+                      << ", Pending: " << total_pending
+                      << ", Consumers: " << consumers.size() << std::endl;
+            last_stats_time = now;
         }
     }
 

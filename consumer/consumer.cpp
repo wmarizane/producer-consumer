@@ -51,7 +51,7 @@ static bool process_line(const std::string& line, Statistics& stats, std::vector
             stats.invalid_transactions++;
             invalidTransactions.push_back(t);
         }
-        if (stats.total_transactions % 10 == 0) {
+        if (stats.total_transactions % 50000 == 0) {
             std::cout << "  Processed " << stats.total_transactions << " transactions..." << std::endl;
         }
         return true;

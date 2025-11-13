@@ -268,7 +268,9 @@
             totalMessages: 0,
             messagesThisSecond: 0,
             lastSecondCount: 0,
-            lastTotalMessages: 0  // Track previous total for throughput calculation
+            lastTotalMessages: 0,  // Track previous total for throughput calculation
+            totalProcessed: 0,      // Combined consumer processing count
+            lastProcessed: 0        // Previous processed count for throughput
         };
 
         let messageParticles = [];
@@ -344,6 +346,9 @@
                     nodes.broker.active = data.broker.active;
                     stats.totalMessages = data.broker.total_messages || 0;
                 }
+                
+                // Calculate total processed messages across all consumers
+                stats.totalProcessed = nodes.consumers.reduce((sum, c) => sum + (c.messageCount || 0), 0);
                 
                 document.getElementById('status-text').textContent = 'Monitoring Active';
                 updateStats();
@@ -578,16 +583,16 @@
         function updateStats() {
             document.getElementById('total-messages').textContent = stats.totalMessages;
             
-            // Calculate throughput as difference from last update
-            const throughput = stats.totalMessages - stats.lastTotalMessages;
+            // Calculate throughput based on consumer processing (messages/sec)
+            const throughput = stats.totalProcessed - stats.lastProcessed;
             document.getElementById('throughput').textContent = throughput;
             
-            // Update last total for next calculation
-            stats.lastTotalMessages = stats.totalMessages;
+            // Update last processed count for next calculation
+            stats.lastProcessed = stats.totalProcessed;
         }
 
         function resetView() {
-            stats = { totalMessages: 0, messagesThisSecond: 0, lastSecondCount: 0, lastTotalMessages: 0 };
+            stats = { totalMessages: 0, messagesThisSecond: 0, lastSecondCount: 0, lastTotalMessages: 0, totalProcessed: 0, lastProcessed: 0 };
             messageParticles = [];
             nodes.producers = [];
             nodes.consumers = [];

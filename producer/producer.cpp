@@ -23,6 +23,14 @@ static int send_all(int fd, const char* data, size_t len) {
 
 int main(int argc, char* argv[]) {
     std::cout << "=== Fault-Tolerant Distributed Producer ===" << std::endl;
+    
+    // Check for delay parameter
+    int delay_ms = 0;  // Default: no delay
+    if (argc >= 4) {
+        delay_ms = std::stoi(argv[3]);
+        std::cout << "Delay between messages: " << delay_ms << "ms" << std::endl;
+    }
+    
     std::cout << "Generating sample transactions..." << std::endl;
     
     std::vector<Transaction> transactions;
@@ -51,7 +59,7 @@ int main(int argc, char* argv[]) {
     }
 
     // If host and port are provided, stream to socket instead of file
-    if (argc == 3) {
+    if (argc >= 3) {
         std::string host = argv[1];
         uint16_t port = static_cast<uint16_t>(std::stoi(argv[2]));
         std::cout << "Connecting to broker at " << host << ":" << port << " ..." << std::endl;
@@ -67,15 +75,25 @@ int main(int argc, char* argv[]) {
         std::cout << "Connected. Streaming transactions..." << std::endl;
 
         char ackbuf[16];
+        int count = 0;
         for (const auto& t : transactions) {
             std::string line = t.serialize();
             line.push_back('\n');
             if (send_all(sockfd, line.c_str(), line.size()) != 0) {
                 std::cerr << "Failed to send transaction." << std::endl; break;
             }
-            // Read ACK line (optional but nice)
-            ssize_t n = recv(sockfd, ackbuf, sizeof(ackbuf)-1, 0);
-            if (n > 0) { ackbuf[n] = '\0'; /* std::cout << "ACK: " << ackbuf; */ }
+            // Don't wait for ACK - send as fast as possible
+            // The broker will buffer and the TCP flow control will handle backpressure
+            
+            count++;
+            if (count % 10000 == 0) {
+                std::cout << "Sent " << count << " transactions..." << std::endl;
+            }
+            
+            // Add delay if specified
+            if (delay_ms > 0) {
+                usleep(delay_ms * 1000);  // Convert ms to microseconds
+            }
         }
 
         close(sockfd);
