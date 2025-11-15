@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Generating sample transactions..." << std::endl;
     
     std::vector<Transaction> transactions;
-    const int numTransactions = 1000000; // 1 million transactions for stress testing
+    const int numTransactions = 2000000; // 2 million transactions - good balance for demo
     
     // Generate transactions
     for (int i = 0; i < numTransactions; i++) {

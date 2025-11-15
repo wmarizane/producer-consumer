@@ -6,12 +6,63 @@
 #include <iomanip>
 #include <string>
 #include <cstring>
+#include <thread>
+#include <chrono>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
+
+// Simulate CPU-intensive fraud detection scoring
+static double compute_fraud_score(const Transaction& t) {
+    // 1. Simulate database lookup via hash computation
+    std::string key = t.card_number + std::to_string(t.amount) + t.timestamp;
+    uint64_t hash = 0;
+    for (char c : key) {
+        hash = hash * 31 + c;  // Prime multiplier for good distribution
+    }
+    
+    // 2. Simulate encryption/decryption work (100 rounds of hashing)
+    for (int i = 0; i < 100; i++) {
+        hash = hash * 1103515245 + 12345;  // Linear congruential generator
+        hash ^= (hash >> 16);               // Bit mixing
+    }
+    
+    // 3. Rule-based fraud scoring
+    double fraud_score = 0.0;
+    fraud_score += (t.amount > 10000) ? 0.3 : 0.0;      // Large transactions suspicious
+    fraud_score += (t.amount < 1) ? 0.2 : 0.0;          // Micro-transactions suspicious
+    fraud_score += (t.card_number.length() != 16) ? 0.5 : 0.0;  // Invalid format
+    
+    // Add complexity based on card digits (force CPU to work through string)
+    for (size_t i = 0; i < t.card_number.length(); i++) {
+        if (t.card_number[i] >= '0' && t.card_number[i] <= '9') {
+            fraud_score += (t.card_number[i] - '0') * 0.001;
+        }
+    }
+    
+    // 4. Simulate ML model inference (simple matrix operations)
+    double features[10];
+    double weights[10] = {0.1, 0.2, 0.15, 0.3, 0.05, 0.1, 0.2, 0.15, 0.05, 0.1};
+    for (int i = 0; i < 10; i++) {
+        features[i] = (t.amount + i * 100) / 10000.0;
+    }
+    double ml_score = 0;
+    for (int i = 0; i < 10; i++) {
+        ml_score += features[i] * weights[i];
+    }
+    fraud_score += ml_score * 0.1;
+    
+    // 5. Simulate network delay for external API calls (e.g., credit bureau check)
+    std::this_thread::sleep_for(std::chrono::microseconds(100)); // 0.1ms per transaction
+    
+    // Use hash in calculation to prevent optimization
+    fraud_score += (hash % 100) * 0.0001;
+    
+    return fraud_score;
+}
 
 struct Statistics {
     int total_transactions = 0;
@@ -45,7 +96,12 @@ static bool process_line(const std::string& line, Statistics& stats, std::vector
         Transaction t = Transaction::deserialize(line);
         stats.total_transactions++;
         stats.total_amount += t.amount;
-        if (t.isValid()) {
+        
+        // Perform CPU-intensive fraud detection
+        double fraud_score = compute_fraud_score(t);
+        bool passed_fraud_check = (fraud_score < 0.8);  // Threshold for fraud detection
+        
+        if (t.isValid() && passed_fraud_check) {
             stats.valid_transactions++;
             stats.valid_amount += t.amount;
         } else {
