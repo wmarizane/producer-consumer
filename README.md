@@ -2,7 +2,7 @@
 
 A high-performance, fault-tolerant distributed system for processing credit card transactions at scale, demonstrating advanced distributed systems concepts including message queuing, pipeline parallelism, and automatic failure recovery.
 
-## 🎯 System Architecture
+## System Architecture
 
 ```
 Producer → Broker → Consumer Pool
@@ -18,7 +18,7 @@ Producer → Broker → Consumer Pool
 - **Consumers**: Process transactions with CPU-intensive fraud detection (hash computation, encryption simulation, ML inference)
 - **Monitor**: Real-time HTTP dashboard for system visualization
 
-## ✨ Key Features
+## Key Features
 
 ### Distributed Systems Concepts
 - **Message Queue Architecture**: Broker buffers and distributes work across consumer pool
@@ -43,7 +43,7 @@ Each transaction undergoes realistic fraud detection:
 
 **Result**: ~18-20k transactions/sec with 4 consumers (realistic payment processing workload)
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Docker Deployment (Recommended)
 
@@ -74,17 +74,9 @@ make clean && make
 ./producer_exe 127.0.0.1 9100 0
 ```
 
-## 📊 Performance Benchmarks
-
-| Consumers | Throughput    | Total Time  | Scaling Efficiency |
-|-----------|---------------|-------------|-------------------|
-| 1         | ~5k trans/sec | ~400 sec    | 100%              |
-| 2         | ~10k trans/sec| ~200 sec    | 100%              |
-| 4         | ~20k trans/sec| ~100 sec    | 100%              |
-
 **Linear scaling demonstrated!** Each consumer adds proportional throughput.
 
-## 🐳 Docker Configuration
+## Docker Configuration
 
 The system uses resource-limited containers to simulate distributed deployment:
 
@@ -94,7 +86,7 @@ The system uses resource-limited containers to simulate distributed deployment:
 
 See `docker-compose.yml` for full configuration.
 
-## 🔧 Configuration
+## Configuration
 
 ### Producer
 ```bash
@@ -114,7 +106,7 @@ See `docker-compose.yml` for full configuration.
 # Example: ./consumer_exe --connect 127.0.0.1 9200
 ```
 
-## 📈 Monitoring
+## Monitoring
 
 Access the real-time monitor dashboard at `http://localhost:8081` to view:
 - Active connections
@@ -122,7 +114,7 @@ Access the real-time monitor dashboard at `http://localhost:8081` to view:
 - Queue depth
 - Processing statistics
 
-## 🛠️ Build from Source
+## Build from Source
 
 ```bash
 # Install dependencies (macOS)
@@ -138,7 +130,7 @@ cmake ..
 make
 ```
 
-## 📚 Project Structure
+## Project Structure
 
 ```
 project/
@@ -151,7 +143,7 @@ project/
 └── docker-compose.yml # Orchestration config
 ```
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Test system with varying consumer counts
@@ -164,7 +156,7 @@ project/
 ./docker_demo.sh
 ```
 
-## 🔥 Fault Tolerance Demo
+## Fault Tolerance Demo
 
 ```bash
 # 1. Start system
@@ -179,13 +171,13 @@ docker-compose up -d broker
 # Result: No message loss, processing continues!
 ```
 
-## 📖 Documentation
+## Documentation
 
 - **[Docker Quick Start](DOCKER_QUICKSTART.md)**: Beginner-friendly Docker guide
 - **[Docker Reference](DOCKER_GUIDE.md)**: Detailed Docker documentation
 - **[Midterm Update](MIDTERM_UPDATE.md)**: Project progress report
 
-## 🎓 Learning Outcomes
+## Learning Outcomes
 
 This project demonstrates:
 - Message queue implementation patterns
@@ -196,7 +188,7 @@ This project demonstrates:
 - Containerization and orchestration
 - System monitoring and observability
 
-## 👨‍💻 Author
+## Author
 
 **Wesley Marizane**  
 COMP 7212: Operating/Distributed Systems  
