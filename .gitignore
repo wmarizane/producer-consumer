@@ -1,14 +1,7 @@
-# Build files
-build/
-*.o
-*.exe
-producer_exe
 broker_exe
 consumer_exe
-
-# IDE and system files
-.vscode/
+producer_exe
+build/
+*.o
+*.a
 .DS_Store
-
-# Log files  
-*.log
